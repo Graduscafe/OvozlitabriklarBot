@@ -1,6 +1,5 @@
 import os
 import logging
-import asyncio
 from aiogram import Bot, Dispatcher, types, executor
 
 # Sozlamalar
@@ -12,65 +11,51 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# Render port qidirishini to'xtatishi uchun hiyla
-async def on_startup(dp):
-    logging.info("Bot ishga tushdi!")
-    if os.environ.get('PORT'):
-        import socket
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.bind(('0.0.0.0', int(os.environ.get('PORT'))))
-            s.listen(1)
-            logging.info(f"Render uchun soxta port ochildi: {os.environ.get('PORT')}")
-        except:
-            pass
-
 @dp.message_handler(commands=['start'])
 async def send_welcome(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         text = (
             "Assalomu alaykum! 🤍\n\n"
             "**Yaqiningizga quvonch ulashishda bizni tanlaganingiz uchun tashakkur!** 🪽\n\n"
-            "Bu yerda sizni kutilmoqda:\n"
-            "📞 Audio tabrik, ✨ Tug‘ilgan kun tabriklari, ✍️ Eksklyuziv sherlar, 🖼 Maxsus tabriknomalar.\n\n"
             "📥 **Buyurtma uchun dildagi so'zlaringizni shu yerga yozing...** ✍️\n\n"
             "🚀 **Ijodkorimiz tez orada sizga javob yozadi!** ✨"
         )
         await message.answer(text, parse_mode="Markdown")
-    else:
-        await message.answer("Xush kelibsiz, Admin! Bot xizmatga tayyor.")
 
 @dp.message_handler(content_types=types.ContentTypes.ANY)
 async def handle_messages(message: types.Message):
-    # 1. ADMIN MIJOZGA JAVOB YOZSA
+    # 1. ADMIN MIJOZGA JAVOB YOZSA (REPLY QILGANDA)
     if message.from_user.id == ADMIN_ID:
         if message.reply_to_message:
             target_id = None
+            # Xabar matni yoki rasm tagidagi yozuvdan ID qidiramiz
             ref_text = message.reply_to_message.text or message.reply_to_message.caption or ""
             
             if "🆔 ID:" in ref_text:
                 try:
-                    target_id = int(ref_text.split("🆔 ID:")[1].strip())
-                except: pass
+                    # ID dan keyingi raqamlarni ajratib olamiz
+                    target_id = int(ref_text.split("🆔 ID:")[1].strip().split()[0])
+                except Exception as e:
+                    logging.error(f"ID ajratishda xato: {e}")
 
             if target_id:
                 try:
                     await bot.copy_message(chat_id=target_id, from_chat_id=ADMIN_ID, message_id=message.message_id)
                     await message.reply("✅ Xabar mijozga yetkazildi.")
                 except Exception as e:
-                    await message.reply(f"❌ Xatolik: {e}")
+                    await message.reply(f"❌ Xabar bormadi (Mijoz botni bloklagan bo'lishi mumkin): {e}")
+            else:
+                await message.reply("⚠️ Xabarda ID topilmadi. Mijoz ma'lumotlari yozilgan xabarga 'Reply' qiling.")
         else:
-            await message.reply("Javob berish uchun xabarga 'Reply' qiling.")
+            await message.reply("Javob berish uchun mijozning ma'lumotlari bor xabariga 'Reply' qiling.")
 
-    # 2. MIJOZ ADMINGA YOZSA (Ma'lumotlarni bitta xabarga jamlash)
+    # 2. MIJOZ ADMINGA YOZSA
     else:
         user = message.from_user
-        
-        # Mijoz xabari nima ekanligini aniqlaymiz (matn yoki media)
         msg_text = message.text or message.caption or "[Media xabar]"
         
-        # Adminga boradigan chiroyli ma'lumotlar jamlanmasi
-        admin_text = (
+        # Ma'lumotlarni bitta chiroyli blokga jamlaymiz
+        admin_info = (
             f"👤 **Kimdan:** {user.full_name}\n"
             f"🔗 **Username:** @{user.username if user.username else 'yoq'}\n"
             f"🆔 ID: {user.id}\n"
@@ -79,27 +64,27 @@ async def handle_messages(message: types.Message):
         )
 
         try:
-            # 1-topshiriq: Profil rasmini olishga harakat qilamiz
+            # Profil rasmini tekshiramiz
             photos = await bot.get_user_profile_photos(user.id, limit=1)
             
             if photos.total_count > 0:
-                # Agar profil rasmi bo'lsa, rasmni tagiga hamma ma'lumotni yozib yuboramiz
+                # Rasmi bo'lsa, ma'lumotlarni rasm tagida yuboramiz
                 await bot.send_photo(
                     chat_id=ADMIN_ID,
                     photo=photos.photos[0][-1].file_id,
-                    caption=admin_text,
+                    caption=admin_info,
                     parse_mode="Markdown"
                 )
             else:
-                # Agar rasm bo'lmasa, faqat matnni o'zini yuboramiz
-                await bot.send_message(ADMIN_ID, admin_text, parse_mode="Markdown")
+                # Rasmi bo'lmasa, faqat matnni o'zini yuboramiz
+                await bot.send_message(ADMIN_ID, admin_info, parse_mode="Markdown")
             
-            # Agar xabar rasm, ovozli yoki video bo'lsa, uni alohida ham nusxalaymiz (lekin ma'lumotsiz)
+            # Agar xabar matn bo'lmasa (rasm, audio, video), uni ham nusxalaymiz
             if not message.text:
                 await bot.copy_message(chat_id=ADMIN_ID, from_chat_id=message.chat.id, message_id=message.message_id)
                 
         except Exception as e:
-            logging.error(f"Xatolik: {e}")
+            logging.error(f"Adminga yuborishda xato: {e}")
 
 if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+    executor.start_polling(dp, skip_updates=True)
