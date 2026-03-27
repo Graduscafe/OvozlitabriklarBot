@@ -15,14 +15,14 @@ dp = Dispatcher(bot)
 async def send_welcome(message: types.Message):
     text = (
         "Assalomu alaykum! 🤍\n\n"
-        "**Yaqiningizga baxt ulashishda bizni tanlaganingiz uchun tashakkur!** 🪽\n\n"
+        "**Yaqiningizga quvonch ulashishda bizni tanlaganingiz uchun tashakkur!** 🪽\n\n"
         "Bu yerda sizni kutilmoqda:\n"
         "📞 **Audio tabrik** — Telefon orqali kutilmagan quvonch!\n"
         "✨ **Tug‘ilgan kun** uchun eng sara tabriklar\n"
         "✍️ **Eksklyuziv** va ma'noli tabrik sherlari\n"
         "🖼 **Ismlarga** yozilgan maxsus tabriknomalar\n\n"
         "📥 **Buyurtma uchun dildagi so'zlaringizni shu yerga yozing...** ✍️\n\n"
-        "*Maxfiylik va samimiylik kafolatlanadi!* 🤫"
+        "🚀 **Ijodkorimiz tez orada sizga javob yozadi!** ✨"
     )
     await message.answer(text, parse_mode="Markdown")
 
