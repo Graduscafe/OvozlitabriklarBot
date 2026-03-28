@@ -2,7 +2,7 @@ import os
 import logging
 import asyncio
 from aiohttp import web
-from aiogram import Bot, Dispatcher, types, executor
+from aiogram import Bot, Dispatcher, types
 
 # === SOZLAMALAR ===
 API_TOKEN = os.getenv('BOT_TOKEN')
@@ -35,6 +35,9 @@ async def send_welcome(message: types.Message):
 @dp.message_handler(content_types=types.ContentTypes.ANY)
 async def handle_messages(message: types.Message):
 
+    # --------------------------------------------------
+    # 1. ADMIN MIJOZGA JAVOB YOZSA (REPLY QILGANDA)
+    # --------------------------------------------------
     if message.from_user.id == ADMIN_ID:
         if message.reply_to_message:
             target_id = None
@@ -76,6 +79,10 @@ async def handle_messages(message: types.Message):
             await message.reply(
                 "ℹ️ Javob berish uchun mijozning xabariga 'Reply' qiling."
             )
+
+    # --------------------------------------------------
+    # 2. MIJOZ ADMINGA YOZSA
+    # --------------------------------------------------
     else:
         user = message.from_user
         msg_text = message.text or message.caption or "[Media xabar]"
@@ -99,7 +106,10 @@ async def handle_messages(message: types.Message):
                     caption=admin_info
                 )
             else:
-                await bot.send_message(chat_id=ADMIN_ID, text=admin_info)
+                await bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=admin_info
+                )
 
             if not message.text:
                 await bot.copy_message(
@@ -121,7 +131,7 @@ async def handle_health(request):
 async def start_web_server():
     app = web.Application()
     app.router.add_get("/", handle_health)
-    port = int(os.getenv("PORT", 8000))
+    port = int(os.getenv("PORT", 10000))
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
@@ -130,7 +140,7 @@ async def start_web_server():
 
 async def main():
     await start_web_server()
-    await dp.start_polling(skip_updates=True)
+    await dp.start_polling(dp.bot, skip_updates=True)
 
 if __name__ == '__main__':
     asyncio.run(main())
