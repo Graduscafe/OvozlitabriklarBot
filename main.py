@@ -1,8 +1,10 @@
 import os
 import logging
+import asyncio
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types, executor
 
-# Sozlamalar
+# === SOZLAMALAR ===
 API_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = int(os.getenv('ADMIN_ID'))
 
@@ -11,80 +13,124 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
+
+# =============================================
+# /start buyrug'i
+# =============================================
 @dp.message_handler(commands=['start'])
 async def send_welcome(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         text = (
             "Assalomu alaykum! 🤍\n\n"
-            "**Yaqiningizga quvonch ulashishda bizni tanlaganingiz uchun tashakkur!** 🪽\n\n"
-            "📥 **Buyurtma uchun dildagi so'zlaringizni shu yerga yozing...** ✍️\n\n"
-            "🚀 **Ijodkorimiz tez orada sizga javob yozadi!** ✨"
+            "Yaqiningizga quvonch ulashishda bizni tanlaganingiz uchun tashakkur! 🪽\n\n"
+            "📥 Buyurtma uchun dildagi so'zlaringizni shu yerga yozing... ✍️\n\n"
+            "🚀 Ijodkorimiz tez orada sizga javob yozadi! ✨"
         )
-        await message.answer(text, parse_mode="Markdown")
+        await message.answer(text)
 
+
+# =============================================
+# Barcha xabarlarni qabul qiluvchi handler
+# =============================================
 @dp.message_handler(content_types=types.ContentTypes.ANY)
 async def handle_messages(message: types.Message):
-    # 1. ADMIN MIJOZGA JAVOB YOZSA (REPLY QILGANDA)
+
     if message.from_user.id == ADMIN_ID:
         if message.reply_to_message:
             target_id = None
-            # Xabar matni yoki rasm tagidagi yozuvdan ID qidiramiz
-            ref_text = message.reply_to_message.text or message.reply_to_message.caption or ""
-            
+
+            ref_text = (
+                message.reply_to_message.text or
+                message.reply_to_message.caption or
+                ""
+            )
+
             if "🆔 ID:" in ref_text:
                 try:
-                    # ID dan keyingi raqamlarni ajratib olamiz
-                    target_id = int(ref_text.split("🆔 ID:")[1].strip().split()[0])
+                    after_id = ref_text.split("🆔 ID:")[1].strip()
+                    target_id = int(after_id.split()[0])
                 except Exception as e:
                     logging.error(f"ID ajratishda xato: {e}")
 
             if target_id:
                 try:
-                    await bot.copy_message(chat_id=target_id, from_chat_id=ADMIN_ID, message_id=message.message_id)
+                    await bot.copy_message(
+                        chat_id=target_id,
+                        from_chat_id=message.chat.id,
+                        message_id=message.message_id
+                    )
                     await message.reply("✅ Xabar mijozga yetkazildi.")
                 except Exception as e:
-                    await message.reply(f"❌ Xabar bormadi (Mijoz botni bloklagan bo'lishi mumkin): {e}")
+                    logging.error(f"Mijozga yuborishda xato: {e}")
+                    await message.reply(
+                        f"❌ Xabar bormadi.\n"
+                        f"Sabab: {e}\n\n"
+                        f"(Mijoz botni bloklagan bo'lishi mumkin)"
+                    )
             else:
-                await message.reply("⚠️ Xabarda ID topilmadi. Mijoz ma'lumotlari yozilgan xabarga 'Reply' qiling.")
+                await message.reply(
+                    "⚠️ Xabarda ID topilmadi.\n"
+                    "Mijoz ma'lumotlari yozilgan xabarga 'Reply' qiling."
+                )
         else:
-            await message.reply("Javob berish uchun mijozning ma'lumotlari bor xabariga 'Reply' qiling.")
-
-    # 2. MIJOZ ADMINGA YOZSA
+            await message.reply(
+                "ℹ️ Javob berish uchun mijozning xabariga 'Reply' qiling."
+            )
     else:
         user = message.from_user
         msg_text = message.text or message.caption or "[Media xabar]"
-        
-        # Ma'lumotlarni bitta chiroyli blokga jamlaymiz
+        username_str = f"@{user.username}" if user.username else "username yo'q"
+
         admin_info = (
-            f"👤 **Kimdan:** {user.full_name}\n"
-            f"🔗 **Username:** @{user.username if user.username else 'yoq'}\n"
+            f"👤 Kimdan: {user.full_name}\n"
+            f"🔗 Username: {username_str}\n"
             f"🆔 ID: {user.id}\n"
-            f"---------------------------\n"
-            f"💬 **Xabar:**\n{msg_text}"
+            f"{'─' * 27}\n"
+            f"💬 Xabar:\n{msg_text}"
         )
 
         try:
-            # Profil rasmini tekshiramiz
             photos = await bot.get_user_profile_photos(user.id, limit=1)
-            
+
             if photos.total_count > 0:
-                # Rasmi bo'lsa, ma'lumotlarni rasm tagida yuboramiz
                 await bot.send_photo(
                     chat_id=ADMIN_ID,
                     photo=photos.photos[0][-1].file_id,
-                    caption=admin_info,
-                    parse_mode="Markdown"
+                    caption=admin_info
                 )
             else:
-                # Rasmi bo'lmasa, faqat matnni o'zini yuboramiz
-                await bot.send_message(ADMIN_ID, admin_info, parse_mode="Markdown")
-            
-            # Agar xabar matn bo'lmasa (rasm, audio, video), uni ham nusxalaymiz
+                await bot.send_message(chat_id=ADMIN_ID, text=admin_info)
+
             if not message.text:
-                await bot.copy_message(chat_id=ADMIN_ID, from_chat_id=message.chat.id, message_id=message.message_id)
-                
+                await bot.copy_message(
+                    chat_id=ADMIN_ID,
+                    from_chat_id=message.chat.id,
+                    message_id=message.message_id
+                )
+
         except Exception as e:
             logging.error(f"Adminga yuborishda xato: {e}")
 
+
+# =============================================
+# RENDER UCHUN DUMMY WEB SERVER
+# =============================================
+async def handle_health(request):
+    return web.Response(text="Bot ishlayapti!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_health)
+    port = int(os.getenv("PORT", 8000))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logging.info(f"Web server {port}-portda ishga tushdi")
+
+async def main():
+    await start_web_server()
+    await dp.start_polling(skip_updates=True)
+
 if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+    asyncio.run(main())
