@@ -1,0 +1,13 @@
+name: Keep Bot Alive
+
+on:
+  schedule:
+    - cron: '* * * * *'  # Har 1 daqiqada
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping bot
+        run: |
+          curl -s https://ovozlitabriklarbot.onrender.com || true
