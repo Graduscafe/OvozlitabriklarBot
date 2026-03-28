@@ -1,8 +1,9 @@
 import os
 import logging
 import asyncio
+import threading
 from aiohttp import web
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, executor
 
 # === SOZLAMALAR ===
 API_TOKEN = os.getenv('BOT_TOKEN')
@@ -35,9 +36,7 @@ async def send_welcome(message: types.Message):
 @dp.message_handler(content_types=types.ContentTypes.ANY)
 async def handle_messages(message: types.Message):
 
-    # --------------------------------------------------
-    # 1. ADMIN MIJOZGA JAVOB YOZSA (REPLY QILGANDA)
-    # --------------------------------------------------
+    # 1. ADMIN MIJOZGA JAVOB YOZSA
     if message.from_user.id == ADMIN_ID:
         if message.reply_to_message:
             target_id = None
@@ -80,9 +79,7 @@ async def handle_messages(message: types.Message):
                 "ℹ️ Javob berish uchun mijozning xabariga 'Reply' qiling."
             )
 
-    # --------------------------------------------------
     # 2. MIJOZ ADMINGA YOZSA
-    # --------------------------------------------------
     else:
         user = message.from_user
         msg_text = message.text or message.caption or "[Media xabar]"
@@ -123,24 +120,33 @@ async def handle_messages(message: types.Message):
 
 
 # =============================================
-# RENDER UCHUN DUMMY WEB SERVER
+# RENDER UCHUN WEB SERVER (alohida thread)
 # =============================================
-async def handle_health(request):
-    return web.Response(text="Bot ishlayapti!")
+def run_web_server():
+    async def handle_health(request):
+        return web.Response(text="Bot ishlayapti!")
 
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get("/", handle_health)
-    port = int(os.getenv("PORT", 10000))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    logging.info(f"Web server {port}-portda ishga tushdi")
+    async def web_main():
+        app = web.Application()
+        app.router.add_get("/", handle_health)
+        port = int(os.getenv("PORT", 10000))
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        logging.info(f"Web server {port}-portda ishga tushdi")
+        await asyncio.sleep(3600 * 24 * 365)
 
-async def main():
-    await start_web_server()
-    await dp.start_polling(dp.bot, skip_updates=True)
+    asyncio.run(web_main())
 
+
+# =============================================
+# ISHGA TUSHIRISH
+# =============================================
 if __name__ == '__main__':
-    asyncio.run(main())
+    # Web server alohida threadda ishga tushadi
+    t = threading.Thread(target=run_web_server, daemon=True)
+    t.start()
+
+    # Bot asosiy threadda ishlaydi
+    executor.start_polling(dp, skip_updates=True)
