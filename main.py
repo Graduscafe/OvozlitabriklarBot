@@ -2,24 +2,93 @@ import os
 import logging
 import asyncio
 import threading
+import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import ChatType
+import asyncpg
 
 # === SOZLAMALAR ===
 API_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = int(os.getenv('ADMIN_ID'))
 GROUP_ID = int(os.getenv('GROUP_ID'))
+DATABASE_URL = os.getenv('DATABASE_URL')
+RENDER_URL = os.getenv('RENDER_URL', 'https://ovozlitabriklarbot.onrender.com')
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# Mijoz ID → Topic ID mapping
-user_topic_map = {}
-# Topic ID → Mijoz ID
-topic_user_map = {}
+# DB connection pool
+db_pool = None
+
+
+# =============================================
+# DATABASE - jadval yaratish va CRUD
+# =============================================
+async def init_db():
+    global db_pool
+    db_pool = await asyncpg.create_pool(DATABASE_URL)
+    async with db_pool.acquire() as conn:
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_topics (
+                user_id BIGINT PRIMARY KEY,
+                topic_id BIGINT NOT NULL
+            )
+        ''')
+    logging.info("Database tayyor!")
+
+async def get_topic_id(user_id: int):
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            'SELECT topic_id FROM user_topics WHERE user_id = $1', user_id
+        )
+        return row['topic_id'] if row else None
+
+async def get_user_id(topic_id: int):
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            'SELECT user_id FROM user_topics WHERE topic_id = $1', topic_id
+        )
+        return row['user_id'] if row else None
+
+async def save_mapping(user_id: int, topic_id: int):
+    async with db_pool.acquire() as conn:
+        await conn.execute('''
+            INSERT INTO user_topics (user_id, topic_id)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id) DO UPDATE SET topic_id = $2
+        ''', user_id, topic_id)
+
+
+# =============================================
+# O'z-o'zini har 2 daqiqada ping qiladi
+# =============================================
+async def self_ping():
+    await asyncio.sleep(30)  # Bot ishga tushguncha kut
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                await session.get(RENDER_URL, timeout=aiohttp.ClientTimeout(total=10))
+            logging.info("Self-ping ✅")
+        except Exception as e:
+            logging.error(f"Self-ping xatosi: {e}")
+        await asyncio.sleep(120)  # 2 daqiqa
+
+
+# =============================================
+# Topic yaratish (to'g'ridan API orqali)
+# =============================================
+async def create_forum_topic(chat_id: int, name: str) -> int:
+    url = f"https://api.telegram.org/bot{API_TOKEN}/createForumTopic"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json={"chat_id": chat_id, "name": name}) as resp:
+            data = await resp.json()
+            if data.get("ok"):
+                return data["result"]["message_thread_id"]
+            else:
+                raise Exception(data.get("description", "Topic yaratishda xato"))
 
 
 # =============================================
@@ -50,7 +119,7 @@ async def handle_group_message(message: types.Message):
     if not message.message_thread_id:
         return
 
-    target_id = topic_user_map.get(message.message_thread_id)
+    target_id = await get_user_id(message.message_thread_id)
 
     if target_id:
         try:
@@ -79,24 +148,16 @@ async def handle_user_message(message: types.Message):
     user = message.from_user
     user_id = user.id
 
-    # Topic allaqachon bormi?
-    if user_id not in user_topic_map:
+    topic_id = await get_topic_id(user_id)
+
+    if not topic_id:
         try:
             username_str = f"@{user.username}" if user.username else "username yo'q"
             topic_name = f"👤 {user.full_name}"
 
-            # Yangi topic yaratamiz
-            result = await bot.create_forum_topic(
-                chat_id=GROUP_ID,
-                name=topic_name
-            )
-            topic_id = result.message_thread_id
+            topic_id = await create_forum_topic(GROUP_ID, topic_name)
+            await save_mapping(user_id, topic_id)
 
-            # Mapping ga saqlaymiz
-            user_topic_map[user_id] = topic_id
-            topic_user_map[topic_id] = user_id
-
-            # Topic ga mijoz ma'lumotlarini yuboramiz
             info_text = (
                 f"👤 Mijoz: {user.full_name}\n"
                 f"🔗 Username: {username_str}\n"
@@ -130,9 +191,6 @@ async def handle_user_message(message: types.Message):
             logging.error(f"Topic yaratishda xato: {e}")
             return
 
-    topic_id = user_topic_map[user_id]
-
-    # Xabarni topicga forward qilamiz
     try:
         await bot.forward_message(
             chat_id=GROUP_ID,
@@ -147,10 +205,10 @@ async def handle_user_message(message: types.Message):
 # =============================================
 # RENDER UCHUN WEB SERVER
 # =============================================
-def run_web_server():
-    async def handle_health(request):
-        return web.Response(text="Bot ishlayapti!")
+async def handle_health(request):
+    return web.Response(text="Bot ishlayapti!")
 
+def run_web_server():
     async def web_main():
         app = web.Application()
         app.router.add_get("/", handle_health)
@@ -168,7 +226,11 @@ def run_web_server():
 # =============================================
 # ISHGA TUSHIRISH
 # =============================================
+async def on_startup(dp):
+    await init_db()
+    asyncio.ensure_future(self_ping())
+
 if __name__ == '__main__':
     t = threading.Thread(target=run_web_server, daemon=True)
     t.start()
-    executor.start_polling(dp, skip_updates=True)
+    executor.start_polling(dp, skip_updates=False, on_startup=on_startup)
